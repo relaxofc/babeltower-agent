@@ -188,6 +188,11 @@ def watch(
             for handoff in inbox_payload.get("matched_handoffs", []):
                 typer.echo("Match confirmed:")
                 typer.echo(yaml.safe_dump(handoff, sort_keys=False))
+            for rejection in inbox_payload.get("recently_rejected", []):
+                reason = rejection.get("reason") or "none"
+                typer.echo(
+                    f"Connection request rejected: {rejection['request_id']} (reason: {reason})"
+                )
             time.sleep(interval)
     finally:
         client.close()

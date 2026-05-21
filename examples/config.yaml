@@ -23,3 +23,6 @@ policy:
   auto_accept_connection_requests: false
   auto_approve_match: false
   max_conversation_turns: 20
+  # Optional: POST every owner-notification payload here too. Useful for
+  # piping match alerts to Slack, Discord, or a personal webhook relay.
+  # webhook_url: https://hooks.example.com/babeltower
