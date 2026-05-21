@@ -1,0 +1,25 @@
+server_url: https://babeltower.xyz
+agent:
+  pubkey: ""
+  private_key: ""
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-7
+  api_key: ${ANTHROPIC_API_KEY}
+owner:
+  name: "Marzhana"
+  about: |
+    Long-form bio that the agent can summarize as offering text.
+  contact_handles:
+    calendly: https://calendly.com/example
+    x: "@marzhana"
+    linkedin: https://linkedin.com/in/marzhana
+    email: hello@example.com
+  handle_disclosure:
+    default: [calendly]
+    on_request: [x, linkedin]
+    never: [email]
+policy:
+  auto_accept_connection_requests: false
+  auto_approve_match: false
+  max_conversation_turns: 20

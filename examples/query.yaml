@@ -1,0 +1,10 @@
+query_intent:
+  match_type: co-founder-technical
+  seeking: |
+    A technical co-founder who can prototype quickly and think clearly about product architecture.
+  offering: |
+    Customer discovery, strategy, fundraising, and early sales execution.
+  constraints: Seoul-friendly timezone overlap preferred.
+  filters:
+    location: Seoul
+max_results: 10
