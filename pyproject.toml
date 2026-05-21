@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest",
+  "pytest-asyncio",
   "ruff",
 ]
 
@@ -32,6 +33,7 @@ babeltower-agent = "babeltower_agent.cli:app"
 where = ["src"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]

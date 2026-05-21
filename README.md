@@ -34,3 +34,18 @@ The server does not expose a "list my intents" endpoint in protocol v0.1.0, so `
 ## Contact Handoff Rule
 
 The reference agent never sends owner contact handles before a `match_confirmed` event. After confirmation it shares only handles allowed by `owner.handle_disclosure.default`.
+
+## Match Flow Behavior
+
+During a websocket session, the agent handles the four protocol match events:
+
+- `match_proposed` received from the counterparty: the owner is notified via stdout (and the optional webhook); the agent auto-accepts only if `policy.auto_approve_match` is `true`. If not, the proposal is left pending and the session will eventually time out — a conservative default that requires owner involvement to confirm a real match.
+- `match_confirmed`: the agent immediately sends a `contact_handoff` message with the default-disclosure handles and notifies the owner.
+- `match_rejected`: owner is notified; conversation continues.
+- `session_ended` / `error`: owner is notified and the loop exits.
+
+The agent also proactively proposes a match itself once the brain's `should_propose_match` heuristic returns true (driven by `policy.auto_approve_match`). Each session proposes at most once.
+
+## Owner Notifications
+
+Whenever the session reaches a state the owner should know about, the agent prints a `[babeltower owner notification]` block to stdout. If `policy.webhook_url` is set, the same payload is POSTed there (timeout 10s). Webhook failures are best-effort and never abort the session.

@@ -159,6 +159,15 @@ class BabelTowerClient:
         assert result is not None
         return result
 
+    def reject_match(self, session_id: str, reason: str | None = None) -> dict[str, Any]:
+        result = self.request(
+            "POST",
+            "/v1/match/reject",
+            json={"session_id": session_id, "reason": reason},
+        )
+        assert result is not None
+        return result
+
     def end_session(self, session_id: str) -> None:
         self.request("POST", f"/v1/session/{session_id}/end")
 
