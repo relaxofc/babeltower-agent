@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 babeltower-agent init --server-url http://localhost:8000
 ```
 
-For production, use `https://babeltower.xyz`. The command generates a local keypair, starts GitHub OAuth registration, opens the browser, polls until registration finishes, and writes `~/.babeltower/config.yaml`.
+For production, use `https://babel-tower.com`. The command generates a local keypair, starts GitHub OAuth registration, opens the browser, polls until registration finishes, and writes `~/.babeltower/config.yaml`.
 
 ## Common Commands
 

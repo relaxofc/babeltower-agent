@@ -95,7 +95,7 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
     expanded = expand_env(raw)
     agent_raw = expanded.get("agent", {})
     return Config(
-        server_url=expanded.get("server_url", "https://babeltower.xyz").rstrip("/"),
+        server_url=expanded.get("server_url", "https://babel-tower.com").rstrip("/"),
         agent=AgentIdentity(
             pubkey=agent_raw["pubkey"],
             private_key=agent_raw["private_key"],

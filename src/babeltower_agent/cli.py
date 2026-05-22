@@ -36,7 +36,7 @@ def client_from_config() -> tuple[Config, BabelTowerClient]:
 
 @app.command()
 def init(
-    server_url: Annotated[str, typer.Option(help="BabelTower server URL.")] = "https://babeltower.xyz",
+    server_url: Annotated[str, typer.Option(help="BabelTower server URL.")] = "https://babel-tower.com",
     owner_name: Annotated[
         str, typer.Option(help="Owner display name for local prompts.")
     ] = "Owner",

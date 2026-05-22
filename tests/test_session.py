@@ -84,8 +84,8 @@ def test_ws_url_handles_http_https_and_bare() -> None:
         == "ws://localhost:8000/v1/session/ses_x"
     )
     assert (
-        ws_url_for_server("https://babeltower.xyz/", "ses_x")
-        == "wss://babeltower.xyz/v1/session/ses_x"
+        ws_url_for_server("https://babel-tower.com/", "ses_x")
+        == "wss://babel-tower.com/v1/session/ses_x"
     )
     assert ws_url_for_server("ws://internal/", "ses_x") == "ws://internal/v1/session/ses_x"
 
