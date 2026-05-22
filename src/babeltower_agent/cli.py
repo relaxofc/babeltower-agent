@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from typing import Annotated, Any
@@ -183,7 +184,19 @@ def watch(
                 if session_id not in joined:
                     joined.add(session_id)
                     typer.echo(f"Joining session {session_id}")
-                    asyncio.run(join_session(config, session_id))
+                    # Run each session in a daemon thread with its own event
+                    # loop so the inbox polling loop above keeps running.
+                    # Without this, asyncio.run() blocks for the entire
+                    # session — up to 30 minutes — and the agent stops
+                    # heart-beating, its intents flip dormant after 5 min,
+                    # and it can't accept any other incoming requests.
+                    threading.Thread(
+                        target=lambda sid=session_id: asyncio.run(
+                            join_session(config, sid)
+                        ),
+                        daemon=True,
+                        name=f"babeltower-session-{session_id}",
+                    ).start()
 
             for handoff in inbox_payload.get("matched_handoffs", []):
                 typer.echo("Match confirmed:")
