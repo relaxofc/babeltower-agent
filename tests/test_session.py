@@ -239,6 +239,49 @@ async def test_process_event_match_confirmed_sends_handoff_and_notifies(capsys) 
 
 
 @pytest.mark.asyncio
+async def test_process_event_surfaces_counterparty_contact_handoff(capsys) -> None:
+    """Regression: when the counterparty sends a contact_handoff message,
+    the agent must notify the owner with the handles instead of feeding the
+    body into the LLM transcript and replying conversationally. Without
+    this, a confirmed match silently ends with the owner never seeing the
+    other person's calendly/linkedin/etc — the whole product loop breaks."""
+    config = _config()
+    client = _FakeClient()
+    socket = _FakeSocket()
+    brain = AgentBrain(config)
+    transcript: list[dict[str, str]] = []
+    state: dict[str, Any] = {"proposed": True}
+
+    handoff_event = {
+        "type": "message",
+        "from": "counterparty_pub",
+        "body": {
+            "kind": "contact_handoff",
+            "handles": {
+                "calendly": "https://calendly.com/marcus/intro",
+                "linkedin": "https://linkedin.com/in/marcus",
+            },
+            "note": "Looking forward to talking.",
+        },
+    }
+    keep = await process_event(
+        config, client, brain, socket, "ses_1", handoff_event, transcript, state
+    )
+
+    assert keep is True
+    # The counterparty's handles must appear in the owner notification.
+    out = capsys.readouterr().out
+    assert "counterparty_handoff" in out
+    assert "calendly.com/marcus" in out
+    # The agent must NOT have appended the handoff to the LLM transcript or
+    # sent a chatty reply — handoff is not a conversation turn.
+    assert transcript == []
+    assert socket.sent == []
+    # The state should record receipt so the rest of the loop can react.
+    assert state["received_handoff"] is True
+
+
+@pytest.mark.asyncio
 async def test_process_event_session_ended_breaks_loop(capsys) -> None:
     config = _config()
     client = _FakeClient()

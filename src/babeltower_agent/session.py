@@ -105,6 +105,26 @@ async def _handle_message_event(
     state: dict[str, Any],
 ) -> None:
     body = event.get("body", {})
+
+    # Phase 11.6: the counterparty's contact_handoff message is the whole
+    # point of the match. Surface the handles to the owner immediately
+    # instead of letting the LLM generate a conversational reply to it.
+    # Without this, a confirmed match completes with the owner never
+    # receiving the contact info — the value loop silently breaks.
+    if body.get("kind") == "contact_handoff":
+        notify_owner(
+            config,
+            {
+                "event": "counterparty_handoff",
+                "session_id": session_id,
+                "counterparty_pubkey": event.get("from"),
+                "handles": body.get("handles") or {},
+                "note": body.get("note"),
+            },
+        )
+        state["received_handoff"] = True
+        return
+
     transcript.append({"from": event.get("from", ""), "body": json.dumps(body)})
     await asyncio.sleep(1)
     await send_json(
