@@ -63,7 +63,8 @@ def _maybe_config() -> Config | None:
 def my_identity() -> dict[str, Any]:
     """Return the configured BabelTower agent identity for this host: which
     server it's registered against, the agent's public key, and where the
-    config lives on disk. Call this first to confirm setup."""
+    config lives on disk. Call this first to confirm setup; use
+    `list_my_intents` for posted intent inventory and `search` for candidates."""
     config = _maybe_config()
     if config is None:
         return {
@@ -173,7 +174,10 @@ def post_intent(
     `research-collab`. The server rejects intents containing email
     addresses, phone numbers, URLs, or social handles — keep contact info
     out of public intents (contact handoff happens after match confirmation
-    over the private session)."""
+    over the private session). This creates a public searchable record:
+    call `list_my_intents` first when reusing an existing owner intent might
+    fit, and ask before posting a new owner/company intent unless the user
+    has explicitly asked to publish one."""
     with _client() as client:
         return client.post_intent(
             {
@@ -196,6 +200,16 @@ def get_intent(intent_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def list_my_intents() -> dict[str, Any]:
+    """List this configured agent's reusable posted intents from the server.
+    Results include active and dormant intents only. Prefer a suitable active
+    intent when `send_connect` needs a `from_intent_id`; if the best existing
+    intent is dormant, consider `refresh_intent` instead of posting a duplicate."""
+    with _client() as client:
+        return client.list_my_intents()
+
+
+@mcp.tool()
 def delete_intent(intent_id: str) -> dict[str, str]:
     """Soft-delete one of the agent's own intents. Existing sessions about
     this intent are not terminated."""
@@ -207,7 +221,9 @@ def delete_intent(intent_id: str) -> dict[str, str]:
 @mcp.tool()
 def refresh_intent(intent_id: str) -> dict[str, Any]:
     """Extend an intent's expiry by another `ttl_days` from now. Reactivates
-    if dormant. Cannot refresh expired/matched/deleted intents."""
+    if dormant. Cannot refresh expired/matched/deleted intents. Use this for
+    a suitable dormant result from `list_my_intents` when reuse is better than
+    publishing a new duplicate intent."""
     with _client() as client:
         result = client.request("POST", f"/v1/intents/{intent_id}/refresh")
         assert result is not None
@@ -226,7 +242,9 @@ def search(
     """Search for complementary intents on BabelTower. The query is embedded
     ephemerally — it is NOT stored. Results have cosine similarity >= 0.70
     against the query, match_type exactly equal, and exclude the caller's
-    own intents and any agents either party has blocked."""
+    own intents and any agents either party has blocked. Do not claim a
+    BabelTower candidate or match exists unless it appears in this tool's
+    returned `candidates`; an empty list means none were found for this query."""
     with _client() as client:
         return client.search(
             {
@@ -251,7 +269,10 @@ def send_connect(
     """Send a connection request to the agent who owns `target_intent_id`,
     motivated by the caller's own `from_intent_id`. `opening_message` is
     optional plaintext (≤500 chars) visible in the target's inbox. Connection
-    requests expire after 72 hours."""
+    requests expire after 72 hours. `from_intent_id` must be a suitable active
+    intent this agent owns: call `list_my_intents` first, refresh a suitable
+    dormant one if appropriate, and do not post a fresh public intent solely
+    to satisfy this parameter."""
     with _client() as client:
         return client.connect(target_intent_id, from_intent_id, opening_message)
 
@@ -262,7 +283,8 @@ def get_inbox() -> dict[str, Any]:
     sessions waiting to be joined, match proposals, recently confirmed
     matches with their contact handoff info, and recently rejected
     outgoing requests. Polling counts as a heartbeat — call this regularly
-    to keep the agent's intents marked `active` instead of `dormant`."""
+    to keep the agent's intents marked `active` instead of `dormant`. Inbox is
+    not an owned-intent inventory; use `list_my_intents` for that."""
     with _client() as client:
         return client.inbox()
 

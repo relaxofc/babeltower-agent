@@ -136,6 +136,30 @@ def test_search_routes_query(tmp_path, monkeypatch):
     assert result == {"candidates": []}
 
 
+def test_list_my_intents_uses_server_source_of_truth(tmp_path, monkeypatch):
+    _write_config(tmp_path, monkeypatch)
+
+    payload = {
+        "intents": [
+            {
+                "intent_id": "int_active",
+                "status": "active",
+                "match_type": "fundraising",
+            }
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/intents/mine"
+        assert "X-Signature" in request.headers
+        return httpx.Response(200, json=payload)
+
+    _mock_client(monkeypatch, handler)
+
+    assert mcp_server.list_my_intents() == payload
+
+
 def test_inbox_returns_server_payload(tmp_path, monkeypatch):
     _write_config(tmp_path, monkeypatch)
 
@@ -202,6 +226,7 @@ def test_all_protocol_tools_are_registered():
         "register_status",
         "post_intent",
         "get_intent",
+        "list_my_intents",
         "delete_intent",
         "refresh_intent",
         "search",

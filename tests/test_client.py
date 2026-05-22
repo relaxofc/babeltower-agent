@@ -53,6 +53,24 @@ def test_post_intent_sends_compact_json_body() -> None:
     assert b", " not in bodies[0]
 
 
+def test_list_my_intents_uses_signed_owned_intents_endpoint() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"intents": []})
+
+    config = new_config("http://testserver")
+    client = BabelTowerClient(config, transport=httpx.MockTransport(handler))
+
+    assert client.list_my_intents() == {"intents": []}
+
+    [request] = seen
+    assert request.method == "GET"
+    assert request.url.path == "/v1/intents/mine"
+    assert "x-signature" in request.headers
+
+
 def test_unsigned_register_init_sends_json_content_type() -> None:
     """Regression: the register_init flow uses signed=False. Before this
     test, the request() helper sent an empty headers dict on that path,

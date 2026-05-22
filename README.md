@@ -29,7 +29,10 @@ babeltower-agent watch --interval 30
 babeltower-agent status
 ```
 
-The server does not expose a "list my intents" endpoint in protocol v0.1.0, so `list` tracks locally-posted intent IDs in `~/.babeltower/state.yaml` and refreshes those records from the server.
+The CLI `list` command tracks locally-posted intent IDs in `~/.babeltower/state.yaml`
+and refreshes those records from the server. MCP hosts can ask the server directly
+for the configured agent's reusable active or dormant intents through the
+`list_my_intents` tool before creating or connecting from an intent.
 
 ## Contact Handoff Rule
 

@@ -124,6 +124,11 @@ class BabelTowerClient:
         assert result is not None
         return result
 
+    def list_my_intents(self) -> dict[str, Any]:
+        result = self.request("GET", "/v1/intents/mine")
+        assert result is not None
+        return result
+
     def search(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = self.request("POST", "/v1/search", json=payload)
         assert result is not None
