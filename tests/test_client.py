@@ -51,3 +51,42 @@ def test_post_intent_sends_compact_json_body() -> None:
     assert result["intent_id"] == "int_test"
     assert b": " not in bodies[0]
     assert b", " not in bodies[0]
+
+
+def test_unsigned_register_init_sends_json_content_type() -> None:
+    """Regression: the register_init flow uses signed=False. Before this
+    test, the request() helper sent an empty headers dict on that path,
+    which meant no Content-Type header — FastAPI/Pydantic then parsed the
+    body as a string and returned 422 'Input should be a valid dictionary
+    or object'. Every CLI registration attempt against the live server
+    failed silently with this bug. The fix: include Content-Type even
+    when signed=False."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "registration_token": "reg_test",
+                "github_oauth_url": "https://github.com/login/oauth/authorize?x=y",
+                "expires_in": 600,
+            },
+        )
+
+    config = new_config("http://testserver")
+    client = BabelTowerClient(config, transport=httpx.MockTransport(handler))
+
+    client.register_init()
+
+    [request] = seen
+    assert request.method == "POST"
+    assert request.url.path == "/v1/register/init"
+    assert request.headers.get("content-type") == "application/json", (
+        "unsigned POSTs must still send Content-Type: application/json so "
+        "FastAPI parses the body as JSON instead of a raw string"
+    )
+    # And it must NOT carry the signature headers — those are reserved
+    # for the signed path.
+    assert "x-signature" not in request.headers
+    assert "x-agent-pubkey" not in request.headers

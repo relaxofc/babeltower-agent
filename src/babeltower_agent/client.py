@@ -68,7 +68,18 @@ class BabelTowerClient:
         query = f"?{urlencode(params)}" if params else ""
         path_with_query = f"{path}{query}"
         body = json_bytes(json)
-        headers = self._signed_headers(method, path_with_query, body) if signed else {}
+        # Even on unsigned endpoints (register_init / status) we still need
+        # Content-Type: application/json. httpx's `content=` kwarg does NOT
+        # set it automatically (unlike `json=`), and FastAPI/Pydantic v2
+        # parses the body as a raw string instead of a JSON object when the
+        # header is missing — which returned a 422 "Input should be a valid
+        # dictionary or object" for every CLI registration attempt before
+        # this fix.
+        headers = (
+            self._signed_headers(method, path_with_query, body)
+            if signed
+            else {"Content-Type": "application/json"}
+        )
         response = self.http.request(method, path_with_query, content=body, headers=headers)
         if response.status_code == 204:
             return None
