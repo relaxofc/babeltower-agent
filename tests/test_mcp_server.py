@@ -136,6 +136,23 @@ def test_search_routes_query(tmp_path, monkeypatch):
     assert result == {"candidates": []}
 
 
+def test_search_omits_match_type_for_cross_type_discovery(tmp_path, monkeypatch):
+    _write_config(tmp_path, monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert "match_type" not in body["query_intent"]
+        return httpx.Response(200, json={"candidates": []})
+
+    _mock_client(monkeypatch, handler)
+
+    result = mcp_server.search(
+        seeking="capital for an AI startup",
+        offering="science social media founders",
+    )
+    assert result == {"candidates": []}
+
+
 def test_list_my_intents_uses_server_source_of_truth(tmp_path, monkeypatch):
     _write_config(tmp_path, monkeypatch)
 

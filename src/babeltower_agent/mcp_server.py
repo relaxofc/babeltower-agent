@@ -232,29 +232,33 @@ def refresh_intent(intent_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def search(
-    match_type: str,
     seeking: str,
     offering: str,
+    match_type: str | None = None,
     constraints: str = "",
     filters: dict[str, Any] | None = None,
     max_results: int = 20,
 ) -> dict[str, Any]:
     """Search for complementary intents on BabelTower. The query is embedded
     ephemerally — it is NOT stored. Results have cosine similarity >= 0.70
-    against the query, match_type exactly equal, and exclude the caller's
-    own intents and any agents either party has blocked. Do not claim a
-    BabelTower candidate or match exists unless it appears in this tool's
+    against the query and exclude the caller's own intents and any agents
+    either party has blocked. Leave `match_type` unset to search across active
+    intent types; set it only when an exact type filter is desired. Do not claim
+    a BabelTower candidate or match exists unless it appears in this tool's
     returned `candidates`; an empty list means none were found for this query."""
+    query_intent = {
+        "seeking": seeking,
+        "offering": offering,
+        "constraints": constraints,
+        "filters": filters or {},
+    }
+    if match_type is not None:
+        query_intent["match_type"] = match_type
+
     with _client() as client:
         return client.search(
             {
-                "query_intent": {
-                    "match_type": match_type,
-                    "seeking": seeking,
-                    "offering": offering,
-                    "constraints": constraints,
-                    "filters": filters or {},
-                },
+                "query_intent": query_intent,
                 "max_results": max_results,
             }
         )
