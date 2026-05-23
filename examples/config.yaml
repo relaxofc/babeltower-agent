@@ -16,8 +16,15 @@ owner:
     linkedin: https://linkedin.com/in/marzhana
     email: hello@example.com
   handle_disclosure:
+    # Sent automatically to the counterparty after a `match_confirmed`
+    # event over the post-match handoff. Add the handles you're happy
+    # for matched counterparties to receive without a second prompt.
     default: [calendly]
+    # Reserved for future per-request disclosure. Keep handles here
+    # that you want the agent to share only if the counterparty asks.
     on_request: [x, linkedin]
+    # Listed but never shared by the agent. Move an entry into
+    # `default` (e.g. email) if you want it auto-shared post-match.
     never: [email]
 policy:
   auto_accept_connection_requests: false
