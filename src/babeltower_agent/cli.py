@@ -21,6 +21,7 @@ from babeltower_agent.config import (
     save_config,
     save_state,
 )
+from babeltower_agent.control import SessionEventStore, SessionRegistry, WatchController
 from babeltower_agent.session import join_session
 
 app = typer.Typer(no_args_is_help=True)
@@ -163,20 +164,42 @@ def watch(
     """Poll inbox, optionally accept requests, and join accepted sessions."""
     config = load_config()
     client = BabelTowerClient(config)
+    event_store = SessionEventStore()
+    registry = SessionRegistry(event_store)
+    controller = WatchController(registry)
     joined: set[str] = set()
+    seen_transitions: set[tuple[str, str, str]] = set()
+
+    def emit_once(kind: str, item_id: str, status: str, message: str) -> None:
+        key = (kind, item_id, status)
+        if key in seen_transitions:
+            return
+        seen_transitions.add(key)
+        typer.echo(message)
+
     try:
+        controller.start()
+        typer.echo(f"Watch controller listening on {controller.socket_path}")
         while True:
             inbox_payload = client.inbox()
             should_accept = auto_accept or config.policy.auto_accept_connection_requests
             if should_accept:
                 for request in inbox_payload.get("pending_requests", []):
                     accepted = client.accept_connection(request["request_id"])
-                    typer.echo(f"Accepted {request['request_id']} -> {accepted['session_id']}")
+                    emit_once(
+                        "request",
+                        request["request_id"],
+                        "accepted",
+                        f"Accepted {request['request_id']} -> {accepted['session_id']}",
+                    )
             else:
                 for request in inbox_payload.get("pending_requests", []):
-                    typer.echo(
+                    emit_once(
+                        "request",
+                        request["request_id"],
+                        "pending",
                         f"Pending request: {request['request_id']} "
-                        f"from {request['from_agent_pubkey']}"
+                        f"from {request['from_agent_pubkey']}",
                     )
 
             for session in inbox_payload.get("accepted_sessions_awaiting_join", []):
@@ -192,22 +215,30 @@ def watch(
                     # and it can't accept any other incoming requests.
                     threading.Thread(
                         target=lambda sid=session_id: asyncio.run(
-                            join_session(config, sid)
+                            join_session(config, sid, registry=registry)
                         ),
                         daemon=True,
                         name=f"babeltower-session-{session_id}",
                     ).start()
 
             for handoff in inbox_payload.get("matched_handoffs", []):
-                typer.echo("Match confirmed:")
-                typer.echo(yaml.safe_dump(handoff, sort_keys=False))
+                emit_once(
+                    "session",
+                    handoff["session_id"],
+                    "match_confirmed",
+                    "Match confirmed:\n" + yaml.safe_dump(handoff, sort_keys=False),
+                )
             for rejection in inbox_payload.get("recently_rejected", []):
                 reason = rejection.get("reason") or "none"
-                typer.echo(
-                    f"Connection request rejected: {rejection['request_id']} (reason: {reason})"
+                emit_once(
+                    "request",
+                    rejection["request_id"],
+                    "rejected",
+                    f"Connection request rejected: {rejection['request_id']} (reason: {reason})",
                 )
             time.sleep(interval)
     finally:
+        controller.stop()
         client.close()
 
 

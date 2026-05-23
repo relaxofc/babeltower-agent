@@ -1,0 +1,33 @@
+name: release
+
+# Publishes to PyPI when a tag like v0.2.0 is pushed.
+#
+# Setup (one-time, on PyPI's web UI):
+#   1. Create a project token for `babeltower-agent` on https://pypi.org
+#      OR (preferred) configure Trusted Publishing for this repo:
+#      https://docs.pypi.org/trusted-publishers/
+#   2. If using Trusted Publishing, remove the `password:` line below.
+#      If using a token, set repo secret PYPI_API_TOKEN.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # for PyPI Trusted Publishing (OIDC)
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # If using a token instead of trusted publishing, uncomment:
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
