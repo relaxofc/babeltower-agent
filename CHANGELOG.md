@@ -3,6 +3,20 @@
 All notable changes to `babeltower-agent` are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.3 — 2026-05-23
+
+### Fixed
+- **Auto-match now requires a structured fit judgment.** The watch agent
+  no longer proposes or accepts a match simply because enough
+  conversation turns have passed. Before proposing or accepting, the
+  brain evaluates the transcript and returns `match`, `do_not_match`, or
+  `uncertain` with a confidence and reason.
+- **Same-topic overlap is no longer sufficient for handoff.** The fit
+  judgment is conservative about conflicts in goals, constraints,
+  seniority, time commitment, budget, geography, mentorship needs,
+  execution expectations, and available support. If fit is rejected, the
+  agent notifies the owner and avoids contact handoff.
+
 ## 0.2.2 — 2026-05-23
 
 ### Fixed
