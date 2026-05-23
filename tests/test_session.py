@@ -251,6 +251,9 @@ async def test_join_session_adds_control_injected_messages_to_brain_transcript(
             "body": {"kind": "conversation", "text": "replying to your injection"},
         }
     )
+    # 0.2.2: the loop no longer exits on max_conversation_turns. Push an
+    # explicit session_ended so this test can assert join_session returns.
+    socket.push({"type": "session_ended", "body": {"reason": "test"}})
     await asyncio.wait_for(task, timeout=2)
 
     outbound = [json.loads(payload) for payload in socket.sent if "human says" in payload]
@@ -313,6 +316,7 @@ async def test_process_event_match_confirmed_sends_handoff_and_notifies(capsys) 
     client = _FakeClient()
     socket = _FakeSocket()
     brain = AgentBrain(config)
+    state: dict[str, Any] = {"proposed": True}
 
     await process_event(
         config,
@@ -322,10 +326,57 @@ async def test_process_event_match_confirmed_sends_handoff_and_notifies(capsys) 
         "ses_1",
         {"type": "match_confirmed", "body": {"confirmed_at": "2026-05-21T00:00:00Z"}},
         [],
-        {"proposed": True},
+        state,
     )
     assert any("contact_handoff" in payload for payload in socket.sent)
     assert "match_confirmed" in capsys.readouterr().out
+    # Regression for 0.2.2: the loop checks `state["sent_handoff"]` to know
+    # when both halves of the handoff have been exchanged so it can close
+    # the session politely. Without this, the loop could spin forever after
+    # a confirmed match.
+    assert state["sent_handoff"] is True
+
+
+@pytest.mark.asyncio
+async def test_process_event_message_does_not_retry_propose_after_failure() -> None:
+    """Regression for 0.2.2: when propose_match raises (e.g. server returns
+    409 session_not_active because the counterparty already proposed and the
+    match was confirmed), the agent must still mark `proposed=True` so it
+    doesn't re-attempt on every subsequent inbound conversation message and
+    spam the API."""
+    config = _config(auto_approve_match=True)
+
+    class _FailingClient(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.propose_calls = 0
+
+        def propose_match(self, session_id: str):
+            self.propose_calls += 1
+            raise RuntimeError("POST /v1/match/propose failed: 409 session_not_active")
+
+    client = _FailingClient()
+    socket = _FakeSocket()
+    brain = _AlwaysProposeBrain(config)
+    transcript: list[dict[str, str]] = []
+    state: dict[str, Any] = {"proposed": False}
+
+    # Three inbound conversation messages — pre-0.2.2, each one would call
+    # propose_match because state["proposed"] was only set on success.
+    for i in range(3):
+        await process_event(
+            config,
+            client,
+            brain,
+            socket,
+            "ses_1",
+            {"type": "message", "from": "pub_b", "body": {"text": f"msg {i}"}},
+            transcript,
+            state,
+        )
+
+    assert client.propose_calls == 1
+    assert state["proposed"] is True
 
 
 @pytest.mark.asyncio

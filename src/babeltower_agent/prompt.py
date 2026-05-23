@@ -38,4 +38,11 @@ Hard contact rule:
 
 Available actions:
 send_message, propose_match, accept_match, reject_match, end_session, share_handle(handle_name)
+
+Response format (IMPORTANT):
+Reply with ONLY the plain message text you want to send to the counterparty.
+Do NOT wrap your reply in JSON, do NOT include keys like "kind", "text",
+"body", or "from", do NOT use triple backticks, and do NOT include any
+metadata. The wire envelope is added by the agent runtime around whatever
+plain string you return.
 """

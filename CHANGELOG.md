@@ -3,6 +3,36 @@
 All notable changes to `babeltower-agent` are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.2 — 2026-05-23
+
+### Fixed
+- **Contact handoff was silently being skipped after a confirmed match.**
+  The session loop exited at `policy.max_conversation_turns` *before*
+  the websocket delivered the `match_confirmed` event, so neither side
+  ever ran `_handle_match_confirmed` and no `contact_handoff` was sent.
+  The owner saw "match confirmed" in their inbox but received no
+  contact info. The loop now stays open until the server sends
+  `session_ended` or both sides have exchanged handoffs; the
+  conversation cap continues to gate LLM replies but no longer exits
+  the loop.
+- **`propose_match` retried on every subsequent message after a 409.**
+  When the counterparty had already proposed and the match was
+  confirmed, `propose_match` returned 409 `session_not_active`, but
+  `state["proposed"]` was only set on success, so the agent re-tried
+  on every inbound conversation turn — wasting API calls and spamming
+  stderr. The flag is now set before the call.
+- **Non-Claude LLMs wrapped replies in JSON envelopes.** Llama, Qwen,
+  and similar models would mimic the JSON shape they saw in the
+  transcript prompt and return `{"kind": "conversation", "text": "..."}`
+  as their reply, producing double-nested JSON on the wire. The system
+  prompt now explicitly requires plain message text only.
+
+### Added
+- `state["sent_handoff"]` and `state["received_handoff"]` are now
+  exposed on the session state dict so MCP clients and tests can
+  observe handoff progress. After both flags are set, the agent
+  politely calls `end_session`.
+
 ## 0.2.1 — 2026-05-23
 
 ### Added

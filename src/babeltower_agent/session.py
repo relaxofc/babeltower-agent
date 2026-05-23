@@ -137,6 +137,18 @@ async def _handle_message_event(
         return
 
     transcript.append({"from": event.get("from", ""), "body": json.dumps(body)})
+
+    # Hard cap on conversational replies (`policy.max_conversation_turns`):
+    # stop generating new LLM replies once we've already replied that many
+    # times, but keep the websocket session loop alive so post-match events
+    # (match_confirmed, contact_handoff) can still flow. Pre-0.2.2 the loop
+    # itself exited at the cap, which dropped match_confirmed and silently
+    # broke handoff. The `>` (not `>=`) preserves the prior visible
+    # behavior of "reply to the first N inbound messages" — the only
+    # change is that the agent now keeps listening after that.
+    if len(transcript) > config.policy.max_conversation_turns:
+        return
+
     await asyncio.sleep(1)
     await send_json(
         websocket,
@@ -151,9 +163,12 @@ async def _handle_message_event(
         not state.get("proposed")
         and brain.should_propose_match(transcript)
     ):
+        # Set `proposed` BEFORE the call so a 409 (session_not_active —
+        # the match was already confirmed by the counterparty) doesn't
+        # trigger an infinite retry on every subsequent message.
+        state["proposed"] = True
         try:
             client.propose_match(session_id)
-            state["proposed"] = True
         except Exception as exc:  # noqa: BLE001 - REST failure shouldn't kill the loop
             print(f"[babeltower propose_match failed] {exc}", file=sys.stderr, flush=True)
 
@@ -192,6 +207,7 @@ async def _handle_match_confirmed(
     websocket,
     session_id: str,
     event: dict[str, Any],
+    state: dict[str, Any],
     recorder: EventRecorder | None = None,
 ) -> None:
     await send_json(
@@ -199,6 +215,7 @@ async def _handle_match_confirmed(
         message_envelope(config, session_id, handoff_body(config)),
         recorder,
     )
+    state["sent_handoff"] = True
     notify_owner(
         config,
         {
@@ -246,7 +263,7 @@ async def process_event(
         await _handle_match_proposed(config, client, websocket, session_id, event, recorder)
         return True
     if event_type == "match_confirmed":
-        await _handle_match_confirmed(config, websocket, session_id, event, recorder)
+        await _handle_match_confirmed(config, websocket, session_id, event, state, recorder)
         return True
     if event_type == "match_rejected":
         await _handle_match_rejected(config, session_id, event)
@@ -272,7 +289,11 @@ async def join_session(
         client = BabelTowerClient(config)
     brain = AgentBrain(config)
     transcript: list[dict[str, str]] = []
-    state: dict[str, Any] = {"proposed": False}
+    state: dict[str, Any] = {
+        "proposed": False,
+        "sent_handoff": False,
+        "received_handoff": False,
+    }
     url = ws_url_for_server(config.server_url, session_id)
     store = event_store or (registry.store if registry is not None else None)
 
@@ -353,7 +374,15 @@ async def join_session(
             control_task = (
                 asyncio.create_task(control_queue.get()) if control_queue is not None else None
             )
-            while len(transcript) < config.policy.max_conversation_turns:
+            # The loop runs until one of:
+            #   - the server sends session_ended / error (process_event returns False)
+            #   - both sides have exchanged contact_handoff after match_confirmed
+            #   - a control command requests end_session
+            # The conversational reply cap (`policy.max_conversation_turns`) is
+            # enforced inside `_handle_message_event` and does NOT exit the loop.
+            # Pre-0.2.2 the loop itself exited at the cap, which dropped the
+            # match_confirmed event and silently skipped the handoff.
+            while True:
                 pending = {websocket_task}
                 if control_task is not None:
                     pending.add(control_task)
@@ -382,6 +411,17 @@ async def join_session(
                     keep_going = await handle_control_command(websocket, command)
                     if not keep_going:
                         return
+                # Close politely once both handoffs have been exchanged.
+                if state.get("sent_handoff") and state.get("received_handoff"):
+                    try:
+                        client.end_session(session_id)
+                    except Exception as exc:  # noqa: BLE001
+                        print(
+                            f"[babeltower end_session after handoff failed] {exc}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    return
     finally:
         for task_name in ("websocket_task", "control_task"):
             task = locals().get(task_name)
