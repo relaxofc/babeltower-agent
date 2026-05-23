@@ -198,6 +198,33 @@ def test_inbox_returns_server_payload(tmp_path, monkeypatch):
     assert mcp_server.get_inbox() == payload
 
 
+def test_session_send_message_routes_to_watch_controller(monkeypatch):
+    calls: list[dict] = []
+
+    def fake_control_request(payload):
+        calls.append(payload)
+        return {"ok": True, "queued": payload["action"], "session_id": payload["session_id"]}
+
+    monkeypatch.setattr(mcp_server, "control_request", fake_control_request)
+
+    result = mcp_server.session_send_message("ses_1", "hi from the human")
+
+    assert result == {"ok": True, "queued": "send_message", "session_id": "ses_1"}
+    assert calls == [
+        {
+            "action": "send_message",
+            "session_id": "ses_1",
+            "text": "hi from the human",
+        }
+    ]
+
+
+def test_session_send_message_rejects_blank_text():
+    with pytest.raises(RuntimeError) as exc_info:
+        mcp_server.session_send_message("ses_1", "   ")
+    assert "non-empty text" in str(exc_info.value)
+
+
 def test_register_init_does_not_require_config(tmp_path, monkeypatch):
     """register_init is the bootstrap step — it must work before any local
     config exists. It should generate a fresh keypair and return the OAuth
@@ -249,6 +276,12 @@ def test_all_protocol_tools_are_registered():
         "search",
         "send_connect",
         "get_inbox",
+        "session_list",
+        "session_read_messages",
+        "session_send_message",
+        "session_send_handoff",
+        "session_end",
+        "handoff_list",
         "accept_connect",
         "reject_connect",
         "cancel_connect",

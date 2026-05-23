@@ -9,11 +9,10 @@ JSON schemas automatically.
 
 The MCP server intentionally does NOT host the live websocket session
 loop — sessions are long-running, stateful, and need an LLM-driven
-brain. That belongs in `babeltower-agent watch`. The MCP surface here
-is the control plane: registration, intents, search, connections,
-inbox, and match REST endpoints. A host LLM (Claude, GPT, Gemma) drives
-these tools through natural language and lets the human stay in
-control of when to actually connect with someone.
+brain. That belongs in `babeltower-agent watch`. For live conversation,
+MCP talks to the local watch process through its Unix-socket controller;
+the BabelTower server remains out of conversation content and contact
+handoff payloads.
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ from mcp.server.fastmcp import FastMCP
 
 from babeltower_agent.client import BabelTowerClient
 from babeltower_agent.config import CONFIG_PATH, Config, load_config
+from babeltower_agent.control import control_request
 
 mcp = FastMCP("babeltower")
 
@@ -276,7 +276,8 @@ def send_connect(
     requests expire after 72 hours. `from_intent_id` must be a suitable active
     intent this agent owns: call `list_my_intents` first, refresh a suitable
     dormant one if appropriate, and do not post a fresh public intent solely
-    to satisfy this parameter."""
+    to satisfy this parameter. Do not use this tool to continue an existing
+    session; use `session_send_message` for live conversation."""
     with _client() as client:
         return client.connect(target_intent_id, from_intent_id, opening_message)
 
@@ -285,12 +286,92 @@ def send_connect(
 def get_inbox() -> dict[str, Any]:
     """Poll the agent's inbox. Returns pending incoming requests, accepted
     sessions waiting to be joined, match proposals, recently confirmed
-    matches with their contact handoff info, and recently rejected
-    outgoing requests. Polling counts as a heartbeat — call this regularly
+    match metadata, and recently rejected outgoing requests. Polling counts
+    as a heartbeat — call this regularly
     to keep the agent's intents marked `active` instead of `dormant`. Inbox is
     not an owned-intent inventory; use `list_my_intents` for that."""
     with _client() as client:
         return client.inbox()
+
+
+@mcp.tool()
+def session_list() -> dict[str, Any]:
+    """List local sessions known to the running `babeltower-agent watch`
+    controller, including which ones are live right now and which have local
+    event logs. Requires `babeltower-agent watch` to be running."""
+    return control_request({"action": "list_sessions"})
+
+
+@mcp.tool()
+def session_read_messages(
+    session_id: str,
+    since_seq: int | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Read locally persisted websocket events for one session. This reads
+    the owner's private local agent log; the BabelTower server still does not
+    store conversation contents or contact handles. Requires
+    `babeltower-agent watch` to be running."""
+    return control_request(
+        {
+            "action": "read_messages",
+            "session_id": session_id,
+            "since_seq": since_seq,
+            "limit": limit,
+        }
+    )
+
+
+@mcp.tool()
+def session_send_message(session_id: str, text: str) -> dict[str, Any]:
+    """Send human-authored text into an existing live websocket session via
+    the running watch agent. This is the correct post-connect chat primitive;
+    do not use `send_connect` to continue an existing conversation. Fails
+    clearly if `babeltower-agent watch` is not running or the session is not
+    live in that process."""
+    if not text.strip():
+        raise RuntimeError("session_send_message requires non-empty text.")
+    return control_request(
+        {
+            "action": "send_message",
+            "session_id": session_id,
+            "text": text,
+        }
+    )
+
+
+@mcp.tool()
+def session_send_handoff(
+    session_id: str,
+    handles: dict[str, str] | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Send a post-match contact handoff over an existing live websocket
+    session through the running watch agent. If `handles` is omitted, the
+    watch agent sends the owner's configured default disclosure handles."""
+    return control_request(
+        {
+            "action": "send_handoff",
+            "session_id": session_id,
+            "handles": handles,
+            "note": note,
+        }
+    )
+
+
+@mcp.tool()
+def session_end(session_id: str) -> dict[str, Any]:
+    """Ask the running watch agent to end a live session and stop its local
+    websocket loop. Requires `babeltower-agent watch` to be running."""
+    return control_request({"action": "end_session", "session_id": session_id})
+
+
+@mcp.tool()
+def handoff_list() -> dict[str, Any]:
+    """List locally stored contact handoffs received by the watch agent. This
+    preserves BabelTower's server-side privacy model by keeping contact
+    payloads on the owner's machine."""
+    return control_request({"action": "list_handoffs"})
 
 
 @mcp.tool()

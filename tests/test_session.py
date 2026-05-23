@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 
 import pytest
 
+from babeltower_agent import session as session_mod
 from babeltower_agent.config import (
     AgentIdentity,
     Config,
@@ -11,10 +14,12 @@ from babeltower_agent.config import (
     OwnerConfig,
     PolicyConfig,
 )
+from babeltower_agent.control import SessionEventStore, SessionRegistry
 from babeltower_agent.crypto import generate_keypair
 from babeltower_agent.llm import AgentBrain
 from babeltower_agent.session import (
     handoff_body,
+    join_session,
     notify_owner,
     process_event,
     should_accept_counterparty_match,
@@ -59,6 +64,29 @@ class _FakeSocket:
         self.sent.append(payload)
 
 
+class _ScriptedSocket:
+    def __init__(self, inbound: list[str]) -> None:
+        self.inbound: asyncio.Queue[str] = asyncio.Queue()
+        for item in inbound:
+            self.inbound.put_nowait(item)
+        self.sent: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return None
+
+    async def send(self, payload: str) -> None:
+        self.sent.append(payload)
+
+    async def recv(self) -> str:
+        return await self.inbound.get()
+
+    def push(self, payload: dict[str, Any]) -> None:
+        self.inbound.put_nowait(json.dumps(payload))
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.proposed: list[str] = []
@@ -76,6 +104,9 @@ class _FakeClient:
     def reject_match(self, session_id: str, reason: str | None = None) -> dict[str, Any]:
         self.rejected.append((session_id, reason))
         return {"session_id": session_id, "match_status": "rejected"}
+
+    def end_session(self, session_id: str) -> None:
+        self.ended = session_id
 
 
 def test_ws_url_handles_http_https_and_bare() -> None:
@@ -147,6 +178,17 @@ class _AlwaysProposeBrain(AgentBrain):
         return True
 
 
+class _TranscriptEchoBrain(AgentBrain):
+    def opening_message(self) -> str:
+        return "opening"
+
+    def reply(self, transcript):
+        return f"seen: {transcript[-2]['body']}"
+
+    def should_propose_match(self, transcript):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_process_event_message_proposes_match_when_brain_says_so() -> None:
     config = _config()
@@ -171,6 +213,54 @@ async def test_process_event_message_proposes_match_when_brain_says_so() -> None
     assert client.proposed == ["ses_1"]
     # The reply was sent over the wire.
     assert any("canned reply" in payload for payload in socket.sent)
+
+
+@pytest.mark.asyncio
+async def test_join_session_adds_control_injected_messages_to_brain_transcript(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = _config()
+    config.policy.max_conversation_turns = 2
+    client = _FakeClient()
+    registry = SessionRegistry(SessionEventStore(tmp_path))
+    socket = _ScriptedSocket([json.dumps({"type": "ready", "session_id": "ses_1"})])
+
+    def fake_connect(url):
+        assert url == "ws://server/v1/session/ses_1"
+        return socket
+
+    monkeypatch.setattr(session_mod.websockets, "connect", fake_connect)
+    monkeypatch.setattr(session_mod, "AgentBrain", _TranscriptEchoBrain)
+
+    task = asyncio.create_task(join_session(config, "ses_1", client=client, registry=registry))
+    for _ in range(20):
+        if registry.list_live():
+            break
+        await asyncio.sleep(0)
+
+    registry.enqueue("ses_1", {"action": "send_message", "text": "human says invest now"})
+    for _ in range(20):
+        if any("human says invest now" in payload for payload in socket.sent):
+            break
+        await asyncio.sleep(0)
+    socket.push(
+        {
+            "type": "message",
+            "from": "counterparty",
+            "body": {"kind": "conversation", "text": "replying to your injection"},
+        }
+    )
+    await asyncio.wait_for(task, timeout=2)
+
+    outbound = [json.loads(payload) for payload in socket.sent if "human says" in payload]
+    assert any(payload["body"]["text"] == "human says invest now" for payload in outbound)
+    assert any(
+        payload["body"]["text"].startswith("seen:")
+        and "human says invest now" in payload["body"]["text"]
+        for payload in map(json.loads, socket.sent)
+        if payload.get("body", {}).get("kind") == "conversation"
+    )
 
 
 @pytest.mark.asyncio

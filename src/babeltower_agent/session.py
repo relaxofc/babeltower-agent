@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -10,6 +11,7 @@ import websockets
 
 from babeltower_agent.client import BabelTowerClient
 from babeltower_agent.config import Config
+from babeltower_agent.control import SessionEventStore, SessionRegistry
 from babeltower_agent.crypto import (
     json_bytes,
     utc_timestamp,
@@ -17,6 +19,8 @@ from babeltower_agent.crypto import (
     websocket_message_signature,
 )
 from babeltower_agent.llm import AgentBrain
+
+EventRecorder = Callable[[str, dict[str, Any]], None]
 
 
 def ws_url_for_server(server_url: str, session_id: str) -> str:
@@ -90,8 +94,14 @@ def should_accept_counterparty_match(config: Config) -> bool:
     return config.policy.auto_approve_match
 
 
-async def send_json(websocket, payload: dict[str, Any]) -> None:
+async def send_json(
+    websocket,
+    payload: dict[str, Any],
+    recorder: EventRecorder | None = None,
+) -> None:
     await websocket.send(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    if recorder is not None:
+        recorder("outbound", payload)
 
 
 async def _handle_message_event(
@@ -103,6 +113,7 @@ async def _handle_message_event(
     event: dict[str, Any],
     transcript: list[dict[str, str]],
     state: dict[str, Any],
+    recorder: EventRecorder | None = None,
 ) -> None:
     body = event.get("body", {})
 
@@ -134,6 +145,7 @@ async def _handle_message_event(
             session_id,
             {"kind": "conversation", "text": brain.reply(transcript)},
         ),
+        recorder,
     )
     if (
         not state.get("proposed")
@@ -152,6 +164,7 @@ async def _handle_match_proposed(
     websocket,
     session_id: str,
     event: dict[str, Any],
+    recorder: EventRecorder | None = None,
 ) -> None:
     proposed_by = event.get("body", {}).get("proposed_by")
     notify_owner(
@@ -171,6 +184,7 @@ async def _handle_match_proposed(
     # the session's 30-min wall clock runs out, the server will close it
     # with reason `time_limit_reached` — a deliberate, reversible default.
     del websocket  # reserved for future "send a polite holding message" use
+    del recorder
 
 
 async def _handle_match_confirmed(
@@ -178,10 +192,12 @@ async def _handle_match_confirmed(
     websocket,
     session_id: str,
     event: dict[str, Any],
+    recorder: EventRecorder | None = None,
 ) -> None:
     await send_json(
         websocket,
         message_envelope(config, session_id, handoff_body(config)),
+        recorder,
     )
     notify_owner(
         config,
@@ -217,19 +233,20 @@ async def process_event(
     event: dict[str, Any],
     transcript: list[dict[str, str]],
     state: dict[str, Any],
+    recorder: EventRecorder | None = None,
 ) -> bool:
     """Dispatch one server event. Returns False if the loop should exit."""
     event_type = event.get("type")
     if event_type == "message":
         await _handle_message_event(
-            config, client, brain, websocket, session_id, event, transcript, state
+            config, client, brain, websocket, session_id, event, transcript, state, recorder
         )
         return True
     if event_type == "match_proposed":
-        await _handle_match_proposed(config, client, websocket, session_id, event)
+        await _handle_match_proposed(config, client, websocket, session_id, event, recorder)
         return True
     if event_type == "match_confirmed":
-        await _handle_match_confirmed(config, websocket, session_id, event)
+        await _handle_match_confirmed(config, websocket, session_id, event, recorder)
         return True
     if event_type == "match_rejected":
         await _handle_match_rejected(config, session_id, event)
@@ -247,6 +264,8 @@ async def join_session(
     config: Config,
     session_id: str,
     client: BabelTowerClient | None = None,
+    registry: SessionRegistry | None = None,
+    event_store: SessionEventStore | None = None,
 ) -> None:
     owns_client = client is None
     if client is None:
@@ -255,6 +274,44 @@ async def join_session(
     transcript: list[dict[str, str]] = []
     state: dict[str, Any] = {"proposed": False}
     url = ws_url_for_server(config.server_url, session_id)
+    store = event_store or (registry.store if registry is not None else None)
+
+    def record(direction: str, event: dict[str, Any]) -> None:
+        if store is not None:
+            store.append(session_id, direction, event)
+        if registry is not None:
+            registry.touch(session_id)
+
+    async def handle_control_command(websocket, command: dict[str, Any]) -> bool:
+        action = command.get("action")
+        if action == "send_message":
+            body = {"kind": "conversation", "text": str(command.get("text", ""))}
+            await send_json(
+                websocket,
+                message_envelope(config, session_id, body),
+                record,
+            )
+            transcript.append({"from": config.agent.pubkey, "body": json.dumps(body)})
+            return True
+        if action == "send_handoff":
+            handles = command.get("handles")
+            body = (
+                handoff_body(config)
+                if handles is None
+                else {
+                    "kind": "contact_handoff",
+                    "handles": handles,
+                    "note": command.get("note")
+                    or f"{config.owner.name} has approved sharing these contact handles.",
+                }
+            )
+            await send_json(websocket, message_envelope(config, session_id, body), record)
+            return True
+        if action == "end_session":
+            client.end_session(session_id)
+            return False
+        return True
+
     try:
         async with websockets.connect(url) as websocket:
             timestamp = utc_timestamp()
@@ -275,6 +332,12 @@ async def join_session(
             first = json.loads(await websocket.recv())
             if first.get("type") != "ready":
                 raise RuntimeError(f"session {session_id} did not become ready: {first}")
+            record("inbound", first)
+
+            control_queue: asyncio.Queue[dict[str, Any]] | None = None
+            if registry is not None:
+                control_queue = asyncio.Queue()
+                registry.register(session_id, asyncio.get_running_loop(), control_queue)
 
             await send_json(
                 websocket,
@@ -283,16 +346,48 @@ async def join_session(
                     session_id,
                     {"kind": "conversation", "text": brain.opening_message()},
                 ),
+                record,
             )
 
+            websocket_task = asyncio.create_task(websocket.recv())
+            control_task = (
+                asyncio.create_task(control_queue.get()) if control_queue is not None else None
+            )
             while len(transcript) < config.policy.max_conversation_turns:
-                raw = await websocket.recv()
-                event = json.loads(raw)
-                keep_going = await process_event(
-                    config, client, brain, websocket, session_id, event, transcript, state
-                )
-                if not keep_going:
-                    return
+                pending = {websocket_task}
+                if control_task is not None:
+                    pending.add(control_task)
+                done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                if websocket_task in done:
+                    raw = websocket_task.result()
+                    websocket_task = asyncio.create_task(websocket.recv())
+                    event = json.loads(raw)
+                    record("inbound", event)
+                    keep_going = await process_event(
+                        config,
+                        client,
+                        brain,
+                        websocket,
+                        session_id,
+                        event,
+                        transcript,
+                        state,
+                        record,
+                    )
+                    if not keep_going:
+                        return
+                if control_task is not None and control_task in done:
+                    command = control_task.result()
+                    control_task = asyncio.create_task(control_queue.get())
+                    keep_going = await handle_control_command(websocket, command)
+                    if not keep_going:
+                        return
     finally:
+        for task_name in ("websocket_task", "control_task"):
+            task = locals().get(task_name)
+            if task is not None:
+                task.cancel()
+        if registry is not None:
+            registry.unregister(session_id)
         if owns_client:
             client.close()
