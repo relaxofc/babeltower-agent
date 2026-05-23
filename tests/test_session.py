@@ -16,7 +16,7 @@ from babeltower_agent.config import (
 )
 from babeltower_agent.control import SessionEventStore, SessionRegistry
 from babeltower_agent.crypto import generate_keypair
-from babeltower_agent.llm import AgentBrain
+from babeltower_agent.llm import AgentBrain, MatchDecision
 from babeltower_agent.session import (
     handoff_body,
     join_session,
@@ -128,9 +128,12 @@ def test_handoff_body_only_includes_default_handles() -> None:
     assert "email" not in body["handles"]
 
 
-def test_should_accept_counterparty_match_tracks_policy() -> None:
-    assert should_accept_counterparty_match(_config(auto_approve_match=False)) is False
-    assert should_accept_counterparty_match(_config(auto_approve_match=True)) is True
+def test_should_accept_counterparty_match_tracks_policy_and_fit() -> None:
+    good = MatchDecision("match", "goals and constraints align", 0.9)
+    bad = MatchDecision("do_not_match", "constraints conflict", 0.9)
+    assert should_accept_counterparty_match(_config(auto_approve_match=False), good) is False
+    assert should_accept_counterparty_match(_config(auto_approve_match=True), good) is True
+    assert should_accept_counterparty_match(_config(auto_approve_match=True), bad) is False
 
 
 def test_notify_owner_prints_summary_and_skips_post_when_no_webhook(capsys) -> None:
@@ -177,6 +180,9 @@ class _AlwaysProposeBrain(AgentBrain):
     def should_propose_match(self, transcript):
         return True
 
+    def evaluate_match(self, transcript):
+        return MatchDecision("match", "test says yes", 0.9)
+
 
 class _TranscriptEchoBrain(AgentBrain):
     def opening_message(self) -> str:
@@ -188,14 +194,33 @@ class _TranscriptEchoBrain(AgentBrain):
     def should_propose_match(self, transcript):
         return False
 
+    def evaluate_match(self, transcript):
+        return MatchDecision("uncertain", "test says no", 0.2)
+
+
+class _NoFitBrain(AgentBrain):
+    def reply(self, transcript):
+        return "canned reply"
+
+    def evaluate_match(self, transcript):
+        return MatchDecision(
+            "do_not_match",
+            "Junior needs regular mentorship; senior needs an independent co-lead.",
+            0.94,
+        )
+
 
 @pytest.mark.asyncio
 async def test_process_event_message_proposes_match_when_brain_says_so() -> None:
-    config = _config()
+    config = _config(auto_approve_match=True)
     client = _FakeClient()
     socket = _FakeSocket()
     brain = _AlwaysProposeBrain(config)
-    transcript: list[dict[str, str]] = []
+    transcript: list[dict[str, str]] = [
+        {"from": "a", "body": "turn 1"},
+        {"from": "b", "body": "turn 2"},
+        {"from": "a", "body": "turn 3"},
+    ]
     state: dict[str, Any] = {"proposed": False}
 
     keep = await process_event(
@@ -213,6 +238,40 @@ async def test_process_event_message_proposes_match_when_brain_says_so() -> None
     assert client.proposed == ["ses_1"]
     # The reply was sent over the wire.
     assert any("canned reply" in payload for payload in socket.sent)
+
+
+@pytest.mark.asyncio
+async def test_process_event_message_does_not_propose_when_fit_judgment_says_no(capsys) -> None:
+    config = _config(auto_approve_match=True)
+    client = _FakeClient()
+    socket = _FakeSocket()
+    brain = _NoFitBrain(config)
+    transcript: list[dict[str, str]] = [
+        {"from": "a", "body": "same topic"},
+        {"from": "b", "body": "same topic"},
+        {"from": "a", "body": "needs regular mentorship"},
+    ]
+    state: dict[str, Any] = {"proposed": False}
+
+    keep = await process_event(
+        config,
+        client,
+        brain,
+        socket,
+        "ses_1",
+        {
+            "type": "message",
+            "from": "pub_b",
+            "body": {"kind": "conversation", "text": "needs independent co-lead"},
+        },
+        transcript,
+        state,
+    )
+
+    assert keep is True
+    assert state["proposed"] is False
+    assert client.proposed == []
+    assert "match_not_proposed" in capsys.readouterr().out
 
 
 @pytest.mark.asyncio
@@ -271,7 +330,7 @@ async def test_process_event_match_proposed_auto_accepts_when_policy_set(capsys)
     config = _config(auto_approve_match=True)
     client = _FakeClient()
     socket = _FakeSocket()
-    brain = AgentBrain(config)
+    brain = _AlwaysProposeBrain(config)
 
     keep = await process_event(
         config,
@@ -286,6 +345,39 @@ async def test_process_event_match_proposed_auto_accepts_when_policy_set(capsys)
     assert keep is True
     assert client.accepted == ["ses_1"]
     assert "match_proposed" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_event_match_proposed_rejects_when_fit_judgment_says_no(capsys) -> None:
+    config = _config(auto_approve_match=True)
+    client = _FakeClient()
+    socket = _FakeSocket()
+    brain = _NoFitBrain(config)
+
+    keep = await process_event(
+        config,
+        client,
+        brain,
+        socket,
+        "ses_1",
+        {"type": "match_proposed", "body": {"proposed_by": "pub_b"}},
+        [
+            {"from": "a", "body": "same field"},
+            {"from": "b", "body": "same field"},
+            {"from": "a", "body": "needs regular guidance"},
+            {"from": "b", "body": "can only do monthly async feedback"},
+        ],
+        {"proposed": False},
+    )
+
+    assert keep is True
+    assert client.accepted == []
+    assert client.rejected == [
+        ("ses_1", "Junior needs regular mentorship; senior needs an independent co-lead.")
+    ]
+    out = capsys.readouterr().out
+    assert "match_proposed" in out
+    assert "match_not_accepted" in out
 
 
 @pytest.mark.asyncio
@@ -358,7 +450,11 @@ async def test_process_event_message_does_not_retry_propose_after_failure() -> N
     client = _FailingClient()
     socket = _FakeSocket()
     brain = _AlwaysProposeBrain(config)
-    transcript: list[dict[str, str]] = []
+    transcript: list[dict[str, str]] = [
+        {"from": "a", "body": "turn 1"},
+        {"from": "b", "body": "turn 2"},
+        {"from": "a", "body": "turn 3"},
+    ]
     state: dict[str, Any] = {"proposed": False}
 
     # Three inbound conversation messages — pre-0.2.2, each one would call

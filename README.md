@@ -52,12 +52,12 @@ The reference agent never sends owner contact handles before a `match_confirmed`
 
 During a websocket session, the agent handles the four protocol match events:
 
-- `match_proposed` received from the counterparty: the owner is notified via stdout (and the optional webhook); the agent auto-accepts only if `policy.auto_approve_match` is `true`. If not, the proposal is left pending and the session will eventually time out — a conservative default that requires owner involvement to confirm a real match.
+- `match_proposed` received from the counterparty: the owner is notified via stdout (and the optional webhook); the agent auto-accepts only if `policy.auto_approve_match` is `true` and the brain's fit judgment says the transcript supports a real match. If not, the proposal is rejected or left pending conservatively.
 - `match_confirmed`: the agent immediately sends a `contact_handoff` message with the default-disclosure handles and notifies the owner.
 - `match_rejected`: owner is notified; conversation continues.
 - `session_ended` / `error`: owner is notified and the loop exits.
 
-The agent also proactively proposes a match itself once the brain's `should_propose_match` heuristic returns true (driven by `policy.auto_approve_match`). Each session proposes at most once.
+The agent also proactively proposes a match itself only after a structured fit judgment returns `match`. The judgment is conservative: same-topic or same-keyword overlap is not enough when goals, constraints, seniority, time commitment, budget, geography, mentorship needs, execution expectations, or available support conflict. Each session proposes at most once.
 
 ## Owner Notifications
 

@@ -18,7 +18,7 @@ from babeltower_agent.crypto import (
     websocket_hello_signature,
     websocket_message_signature,
 )
-from babeltower_agent.llm import AgentBrain
+from babeltower_agent.llm import AgentBrain, MatchDecision
 
 EventRecorder = Callable[[str, dict[str, Any]], None]
 
@@ -85,13 +85,20 @@ def notify_owner(
         print(f"[babeltower webhook failed] {exc}", file=sys.stderr, flush=True)
 
 
-def should_accept_counterparty_match(config: Config) -> bool:
+def should_accept_counterparty_match(config: Config, decision: MatchDecision) -> bool:
     """Default policy: only auto-accept a match the counterparty proposed
-    if the owner has already opted into auto-approve. Otherwise the
-    proposal is logged for the owner and the session is left to time
-    out, which is conservative and reversible (the counterparty can
-    propose again in a future session)."""
-    return config.policy.auto_approve_match
+    if the owner has already opted into auto-approve and the agent's fit
+    judgment says this is actually a good match. Otherwise the proposal is
+    logged for the owner and rejected or left pending conservatively."""
+    return config.policy.auto_approve_match and decision.should_match
+
+
+def decision_payload(decision: MatchDecision) -> dict[str, Any]:
+    return {
+        "decision": decision.decision,
+        "confidence": decision.confidence,
+        "reason": decision.reason,
+    }
 
 
 async def send_json(
@@ -161,8 +168,24 @@ async def _handle_message_event(
     )
     if (
         not state.get("proposed")
-        and brain.should_propose_match(transcript)
+        and config.policy.auto_approve_match
+        and len(transcript) >= 4
     ):
+        decision = brain.evaluate_match(transcript)
+        state["last_match_decision"] = decision_payload(decision)
+        if not decision.should_match:
+            if decision.decision == "do_not_match" and not state.get("notified_no_match"):
+                state["notified_no_match"] = True
+                notify_owner(
+                    config,
+                    {
+                        "event": "match_not_proposed",
+                        "session_id": session_id,
+                        "fit_decision": decision_payload(decision),
+                    },
+                )
+            return
+
         # Set `proposed` BEFORE the call so a 409 (session_not_active —
         # the match was already confirmed by the counterparty) doesn't
         # trigger an infinite retry on every subsequent message.
@@ -176,9 +199,12 @@ async def _handle_message_event(
 async def _handle_match_proposed(
     config: Config,
     client: BabelTowerClient,
+    brain: AgentBrain,
     websocket,
     session_id: str,
     event: dict[str, Any],
+    transcript: list[dict[str, str]],
+    state: dict[str, Any],
     recorder: EventRecorder | None = None,
 ) -> None:
     proposed_by = event.get("body", {}).get("proposed_by")
@@ -190,11 +216,28 @@ async def _handle_match_proposed(
             "proposed_by": proposed_by,
         },
     )
-    if should_accept_counterparty_match(config):
+    decision = brain.should_accept_match(transcript)
+    state["last_match_decision"] = decision_payload(decision)
+    if should_accept_counterparty_match(config, decision):
         try:
             client.accept_match(session_id)
         except Exception as exc:  # noqa: BLE001
             print(f"[babeltower accept_match failed] {exc}", file=sys.stderr, flush=True)
+    else:
+        notify_owner(
+            config,
+            {
+                "event": "match_not_accepted",
+                "session_id": session_id,
+                "proposed_by": proposed_by,
+                "fit_decision": decision_payload(decision),
+            },
+        )
+        if decision.decision == "do_not_match":
+            try:
+                client.reject_match(session_id, decision.reason or "Fit check did not pass.")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[babeltower reject_match failed] {exc}", file=sys.stderr, flush=True)
     # If we don't auto-accept and the owner hasn't intervened by the time
     # the session's 30-min wall clock runs out, the server will close it
     # with reason `time_limit_reached` — a deliberate, reversible default.
@@ -260,7 +303,9 @@ async def process_event(
         )
         return True
     if event_type == "match_proposed":
-        await _handle_match_proposed(config, client, websocket, session_id, event, recorder)
+        await _handle_match_proposed(
+            config, client, brain, websocket, session_id, event, transcript, state, recorder
+        )
         return True
     if event_type == "match_confirmed":
         await _handle_match_confirmed(config, websocket, session_id, event, state, recorder)
