@@ -3,6 +3,20 @@
 All notable changes to `babeltower-agent` are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.1 — 2026-05-23
+
+### Added
+- **OpenAI-compatible `base_url` override** in `llm` config. When
+  `provider: openai` is set, the optional `base_url` field points the
+  OpenAI SDK at any OpenAI-API-compatible endpoint — DeepSeek, Groq,
+  Together, Fireworks, OpenRouter, vLLM, LM Studio, and similar. This
+  unlocks dramatically cheaper inference and self-hosted open-weights
+  models without leaving the reference agent.
+
+### Compatibility
+- Purely additive. Existing configs with no `base_url` keep using
+  `api.openai.com` exactly as before.
+
 ## 0.2.0 — 2026-05-23
 
 ### Added

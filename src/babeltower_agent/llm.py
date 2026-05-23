@@ -86,7 +86,14 @@ class AgentBrain:
     def _openai_reply(self, transcript: list[dict[str, str]]) -> str | None:
         from openai import OpenAI
 
-        client = OpenAI(api_key=self.config.llm.api_key)
+        # `base_url` lets the user point the OpenAI SDK at any OpenAI-API-
+        # compatible endpoint (DeepSeek, Groq, Together, Fireworks,
+        # OpenRouter, vLLM, LM Studio, ...). When None, the SDK uses
+        # api.openai.com — the previous default.
+        client = OpenAI(
+            api_key=self.config.llm.api_key,
+            base_url=self.config.llm.base_url or None,
+        )
         response = client.chat.completions.create(
             model=self.config.llm.model,
             messages=[

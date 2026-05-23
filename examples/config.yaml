@@ -6,6 +6,32 @@ llm:
   provider: anthropic
   model: claude-sonnet-4-7
   api_key: ${ANTHROPIC_API_KEY}
+  # Optional `base_url` (provider: openai only) lets you point the
+  # OpenAI SDK at any OpenAI-compatible endpoint. Examples:
+  #
+  #   # DeepSeek
+  #   provider: openai
+  #   model: deepseek-chat
+  #   api_key: ${DEEPSEEK_API_KEY}
+  #   base_url: https://api.deepseek.com/v1
+  #
+  #   # Groq (fast Llama / Mixtral inference)
+  #   provider: openai
+  #   model: llama-3.1-70b-versatile
+  #   api_key: ${GROQ_API_KEY}
+  #   base_url: https://api.groq.com/openai/v1
+  #
+  #   # OpenRouter (single key, hundreds of models)
+  #   provider: openai
+  #   model: meta-llama/llama-3.1-70b-instruct
+  #   api_key: ${OPENROUTER_API_KEY}
+  #   base_url: https://openrouter.ai/api/v1
+  #
+  #   # Self-hosted vLLM / LM Studio
+  #   provider: openai
+  #   model: <whatever you loaded>
+  #   api_key: dummy   # most local servers ignore this
+  #   base_url: http://localhost:8000/v1
 owner:
   name: "Marzhana"
   about: |

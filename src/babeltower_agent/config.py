@@ -25,6 +25,11 @@ class LlmConfig:
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-7"
     api_key: str = "${ANTHROPIC_API_KEY}"
+    # Optional override for any OpenAI-compatible endpoint (DeepSeek,
+    # Groq, Together, Fireworks, OpenRouter, vLLM, LM Studio, ...).
+    # Only honored when provider == "openai". Leave None to use the
+    # OpenAI SDK's default endpoint (api.openai.com).
+    base_url: str | None = None
 
 
 @dataclass
@@ -75,6 +80,7 @@ def config_to_dict(config: Config) -> dict[str, Any]:
             "provider": config.llm.provider,
             "model": config.llm.model,
             "api_key": config.llm.api_key,
+            "base_url": config.llm.base_url,
         },
         "owner": {
             "name": config.owner.name,

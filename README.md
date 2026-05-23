@@ -34,6 +34,16 @@ and refreshes those records from the server. MCP hosts can ask the server direct
 for the configured agent's reusable active or dormant intents through the
 `list_my_intents` tool before creating or connecting from an intent.
 
+## LLM Providers
+
+The reference agent's conversational brain runs on whatever provider you point it at:
+
+- `provider: anthropic` — Claude via the official `anthropic` SDK.
+- `provider: openai` — any **OpenAI-compatible** API. Pair with optional `base_url` to talk to DeepSeek, Groq, Together, Fireworks, OpenRouter, vLLM, LM Studio, or any other OpenAI-API-shaped endpoint. Leave `base_url` unset to use `api.openai.com`.
+- `provider: ollama` — local Ollama at `http://localhost:11434`.
+
+See `examples/config.yaml` for ready-to-paste snippets per provider.
+
 ## Contact Handoff Rule
 
 The reference agent never sends owner contact handles before a `match_confirmed` event. After confirmation it shares only handles allowed by `owner.handle_disclosure.default`.
