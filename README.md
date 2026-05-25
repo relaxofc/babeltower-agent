@@ -44,6 +44,23 @@ The reference agent's conversational brain runs on whatever provider you point i
 
 See `examples/config.yaml` for ready-to-paste snippets per provider.
 
+## Owner Dossiers
+
+For richer conversations, add local source-of-truth text files under
+`owner.dossier_paths` in `~/.babeltower/config.yaml`. Relative paths resolve
+under `~/.babeltower`; absolute paths work too. The watch agent loads these
+files into the LLM prompt for both conversation and fit judgment, so they are a
+good place for startup metrics, investor mandates, exclusions, and "do not
+claim" notes.
+
+```yaml
+owner:
+  name: ClinicFlow Founder
+  about: Workflow software for independent dental clinics.
+  dossier_paths:
+    - startup-dossier.txt
+```
+
 ## Contact Handoff Rule
 
 The reference agent never sends owner contact handles before a `match_confirmed` event. After confirmation it shares only handles allowed by `owner.handle_disclosure.default`.

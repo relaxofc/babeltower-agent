@@ -36,6 +36,12 @@ owner:
   name: "Marzhana"
   about: |
     Long-form bio that the agent can summarize as offering text.
+  # Optional local source-of-truth files loaded into the agent prompt.
+  # Relative paths resolve under ~/.babeltower; absolute paths work too.
+  # Use these for longer startup/investor dossiers, metrics, exclusions,
+  # and "do not claim" notes that should guide conversation and fit checks.
+  dossier_paths:
+    - startup-dossier.txt
   contact_handles:
     calendly: https://calendly.com/example
     x: "@marzhana"

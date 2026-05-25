@@ -36,6 +36,7 @@ class LlmConfig:
 class OwnerConfig:
     name: str = "Owner"
     about: str = ""
+    dossier_paths: list[str] = field(default_factory=list)
     contact_handles: dict[str, str] = field(default_factory=dict)
     handle_disclosure: dict[str, list[str]] = field(
         default_factory=lambda: {"default": [], "on_request": [], "never": []}
@@ -85,6 +86,7 @@ def config_to_dict(config: Config) -> dict[str, Any]:
         "owner": {
             "name": config.owner.name,
             "about": config.owner.about,
+            "dossier_paths": config.owner.dossier_paths,
             "contact_handles": config.owner.contact_handles,
             "handle_disclosure": config.owner.handle_disclosure,
         },

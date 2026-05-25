@@ -1,6 +1,44 @@
 from __future__ import annotations
 
-from babeltower_agent.config import Config
+from pathlib import Path
+
+from babeltower_agent.config import CONFIG_DIR, Config
+
+MAX_DOSSIER_CHARS = 12_000
+MAX_TOTAL_DOSSIER_CHARS = 40_000
+
+
+def _resolve_dossier_path(raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path
+    return CONFIG_DIR / path
+
+
+def owner_dossier_context(config: Config) -> str:
+    blocks: list[str] = []
+    remaining = MAX_TOTAL_DOSSIER_CHARS
+    for raw_path in config.owner.dossier_paths:
+        if remaining <= 0:
+            break
+        path = _resolve_dossier_path(raw_path)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            blocks.append(f"### {raw_path}\n[Could not read dossier file: {exc}]")
+            continue
+
+        text = text.strip()
+        if len(text) > MAX_DOSSIER_CHARS:
+            text = text[:MAX_DOSSIER_CHARS].rstrip() + "\n[truncated]"
+        if len(text) > remaining:
+            text = text[:remaining].rstrip() + "\n[truncated]"
+        remaining -= len(text)
+        blocks.append(f"### {raw_path}\n{text}")
+
+    if not blocks:
+        return "No local dossier files configured."
+    return "\n\n".join(blocks)
 
 
 def conversation_system_prompt(
@@ -11,12 +49,16 @@ def conversation_system_prompt(
     default_handles = config.owner.handle_disclosure.get("default", [])
     on_request = config.owner.handle_disclosure.get("on_request", [])
     never = config.owner.handle_disclosure.get("never", [])
+    dossier_context = owner_dossier_context(config)
     return f"""You are an AI agent representing {config.owner.name}.
 
 You must clearly identify yourself as an AI agent acting for your owner.
 
 Owner profile:
 {config.owner.about}
+
+Owner dossier files:
+{dossier_context}
 
 Your active intent:
 {active_intent}
