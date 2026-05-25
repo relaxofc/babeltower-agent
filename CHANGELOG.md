@@ -3,6 +3,17 @@
 All notable changes to `babeltower-agent` are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.4 — 2026-05-25
+
+### Added
+- **Local owner dossier files.** Agents can now load owner-controlled
+  source-of-truth text files through `owner.dossier_paths` in
+  `~/.babeltower/config.yaml`. Relative paths resolve under
+  `~/.babeltower`; absolute paths are supported. Dossier text is added
+  to conversation and fit-judgment prompts with size limits, so owners
+  can provide richer metrics, mandates, exclusions, and "do not claim"
+  notes without uploading those files to the BabelTower server.
+
 ## 0.2.3 — 2026-05-23
 
 ### Fixed
