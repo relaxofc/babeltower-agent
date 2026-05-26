@@ -156,18 +156,35 @@ async def _handle_message_event(
     if len(transcript) > config.policy.max_conversation_turns:
         return
 
+    if state.get("match_confirmed"):
+        return
+
     await asyncio.sleep(1)
-    await send_json(
-        websocket,
-        message_envelope(
+    reply_text = brain.reply(transcript)
+    if reply_text == state.get("last_reply_text"):
+        notify_owner(
             config,
-            session_id,
-            {"kind": "conversation", "text": brain.reply(transcript)},
-        ),
-        recorder,
-    )
+            {
+                "event": "duplicate_reply_suppressed",
+                "session_id": session_id,
+                "text": reply_text,
+            },
+        )
+    else:
+        await send_json(
+            websocket,
+            message_envelope(
+                config,
+                session_id,
+                {"kind": "conversation", "text": reply_text},
+            ),
+            recorder,
+        )
+        state["last_reply_text"] = reply_text
     if (
         not state.get("proposed")
+        and not state.get("match_pending")
+        and not state.get("match_confirmed")
         and config.policy.auto_approve_match
         and len(transcript) >= 4
     ):
@@ -208,6 +225,7 @@ async def _handle_match_proposed(
     recorder: EventRecorder | None = None,
 ) -> None:
     proposed_by = event.get("body", {}).get("proposed_by")
+    state["match_pending"] = True
     notify_owner(
         config,
         {
@@ -236,6 +254,7 @@ async def _handle_match_proposed(
         if decision.decision == "do_not_match":
             try:
                 client.reject_match(session_id, decision.reason or "Fit check did not pass.")
+                state["match_pending"] = False
             except Exception as exc:  # noqa: BLE001
                 print(f"[babeltower reject_match failed] {exc}", file=sys.stderr, flush=True)
     # If we don't auto-accept and the owner hasn't intervened by the time
@@ -253,6 +272,9 @@ async def _handle_match_confirmed(
     state: dict[str, Any],
     recorder: EventRecorder | None = None,
 ) -> None:
+    state["match_confirmed"] = True
+    state["match_pending"] = False
+    state["proposed"] = True
     await send_json(
         websocket,
         message_envelope(config, session_id, handoff_body(config)),
@@ -273,7 +295,10 @@ async def _handle_match_rejected(
     config: Config,
     session_id: str,
     event: dict[str, Any],
+    state: dict[str, Any],
 ) -> None:
+    state["match_pending"] = False
+    state["proposed"] = False
     notify_owner(
         config,
         {
@@ -311,7 +336,7 @@ async def process_event(
         await _handle_match_confirmed(config, websocket, session_id, event, state, recorder)
         return True
     if event_type == "match_rejected":
-        await _handle_match_rejected(config, session_id, event)
+        await _handle_match_rejected(config, session_id, event, state)
         return True
     if event_type in {"session_ended", "error"}:
         notify_owner(
@@ -336,6 +361,8 @@ async def join_session(
     transcript: list[dict[str, str]] = []
     state: dict[str, Any] = {
         "proposed": False,
+        "match_pending": False,
+        "match_confirmed": False,
         "sent_handoff": False,
         "received_handoff": False,
     }

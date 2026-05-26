@@ -331,6 +331,7 @@ async def test_process_event_match_proposed_auto_accepts_when_policy_set(capsys)
     client = _FakeClient()
     socket = _FakeSocket()
     brain = _AlwaysProposeBrain(config)
+    state: dict[str, Any] = {"proposed": False}
 
     keep = await process_event(
         config,
@@ -340,10 +341,11 @@ async def test_process_event_match_proposed_auto_accepts_when_policy_set(capsys)
         "ses_1",
         {"type": "match_proposed", "body": {"proposed_by": "pub_b"}},
         [],
-        {"proposed": False},
+        state,
     )
     assert keep is True
     assert client.accepted == ["ses_1"]
+    assert state["match_pending"] is True
     assert "match_proposed" in capsys.readouterr().out
 
 
@@ -427,6 +429,74 @@ async def test_process_event_match_confirmed_sends_handoff_and_notifies(capsys) 
     # the session politely. Without this, the loop could spin forever after
     # a confirmed match.
     assert state["sent_handoff"] is True
+    assert state["match_confirmed"] is True
+    assert state["match_pending"] is False
+    assert state["proposed"] is True
+
+
+@pytest.mark.asyncio
+async def test_process_event_does_not_propose_after_counterparty_proposal() -> None:
+    config = _config(auto_approve_match=True)
+    client = _FakeClient()
+    socket = _FakeSocket()
+    brain = _AlwaysProposeBrain(config)
+    transcript: list[dict[str, str]] = [
+        {"from": "a", "body": "turn 1"},
+        {"from": "b", "body": "turn 2"},
+        {"from": "a", "body": "turn 3"},
+        {"from": "b", "body": "turn 4"},
+    ]
+    state: dict[str, Any] = {"proposed": False}
+
+    await process_event(
+        config,
+        client,
+        brain,
+        socket,
+        "ses_1",
+        {"type": "match_proposed", "body": {"proposed_by": "pub_b"}},
+        transcript,
+        state,
+    )
+    await process_event(
+        config,
+        client,
+        brain,
+        socket,
+        "ses_1",
+        {"type": "message", "from": "pub_b", "body": {"text": "one more thing"}},
+        transcript,
+        state,
+    )
+
+    assert client.accepted == ["ses_1"]
+    assert client.proposed == []
+    assert state["match_pending"] is True
+
+
+@pytest.mark.asyncio
+async def test_process_event_suppresses_duplicate_replies(capsys) -> None:
+    config = _config()
+    client = _FakeClient()
+    socket = _FakeSocket()
+    brain = _AlwaysProposeBrain(config)
+    transcript: list[dict[str, str]] = []
+    state: dict[str, Any] = {"proposed": False}
+
+    for i in range(2):
+        await process_event(
+            config,
+            client,
+            brain,
+            socket,
+            "ses_1",
+            {"type": "message", "from": "pub_b", "body": {"text": f"msg {i}"}},
+            transcript,
+            state,
+        )
+
+    assert sum("canned reply" in payload for payload in socket.sent) == 1
+    assert "duplicate_reply_suppressed" in capsys.readouterr().out
 
 
 @pytest.mark.asyncio

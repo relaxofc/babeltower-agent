@@ -3,6 +3,22 @@
 All notable changes to `babeltower-agent` are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.5 — 2026-05-26
+
+### Fixed
+- **LLM reply failures no longer produce generic question spam.** If the
+  configured model cannot produce a reliable reply, the agent now pauses
+  with an explicit message instead of falling back to a bland clarifying
+  question that can repeat across turns. LLM reply errors are surfaced on
+  stderr for debugging.
+- **Duplicate outbound replies are suppressed.** The session loop tracks
+  the last sent reply and notifies the owner instead of sending the same
+  message again.
+- **Counterparty proposals block duplicate self-proposals.** When a
+  counterparty has already proposed a match, the agent records the
+  pending match state and does not race to propose the same match again
+  on the next inbound message.
+
 ## 0.2.4 — 2026-05-25
 
 ### Added

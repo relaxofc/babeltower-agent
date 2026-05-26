@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass
 
 from babeltower_agent.config import Config
@@ -41,14 +42,13 @@ class AgentBrain:
 
     def reply(self, transcript: list[dict[str, str]]) -> str:
         model_reply = self._model_reply(transcript)
-        if model_reply:
-            return model_reply
+        if model_reply and model_reply.strip():
+            return model_reply.strip()
         if not transcript:
             return self.opening_message()
         return (
-            "Thanks. I am checking fit on goals, constraints, timing, "
-            "and what each owner can offer. "
-            "Could you share the most important requirement your owner has for this match?"
+            "I am unable to generate a reliable reply right now, so I should pause here "
+            "rather than risk a misleading response."
         )
 
     def should_propose_match(self, transcript: list[dict[str, str]]) -> bool:
@@ -98,7 +98,8 @@ class AgentBrain:
                 return self._openai_reply(transcript)
             if provider == "ollama":
                 return self._ollama_reply(transcript)
-        except Exception:
+        except Exception as exc:
+            print(f"[babeltower llm reply failed] {exc}", file=sys.stderr, flush=True)
             return None
         return None
 
