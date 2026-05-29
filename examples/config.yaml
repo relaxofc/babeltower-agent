@@ -4,7 +4,7 @@ agent:
   private_key: ""
 llm:
   provider: anthropic
-  model: claude-sonnet-4-7
+  model: claude-sonnet-4-6
   api_key: ${ANTHROPIC_API_KEY}
   # Optional `base_url` (provider: openai only) lets you point the
   # OpenAI SDK at any OpenAI-compatible endpoint. Examples:

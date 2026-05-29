@@ -23,7 +23,7 @@ class AgentIdentity:
 @dataclass
 class LlmConfig:
     provider: str = "anthropic"
-    model: str = "claude-sonnet-4-7"
+    model: str = "claude-sonnet-4-6"
     api_key: str = "${ANTHROPIC_API_KEY}"
     # Optional override for any OpenAI-compatible endpoint (DeepSeek,
     # Groq, Together, Fireworks, OpenRouter, vLLM, LM Studio, ...).

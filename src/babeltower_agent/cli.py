@@ -213,10 +213,19 @@ def watch(
                     # session — up to 30 minutes — and the agent stops
                     # heart-beating, its intents flip dormant after 5 min,
                     # and it can't accept any other incoming requests.
+                    def run_session(session: dict[str, Any] = session) -> None:
+                        asyncio.run(
+                            join_session(
+                                config,
+                                session["session_id"],
+                                registry=registry,
+                                my_intent_id=session.get("my_intent_id"),
+                                counterparty_intent_id=session.get("counterparty_intent_id"),
+                            )
+                        )
+
                     threading.Thread(
-                        target=lambda sid=session_id: asyncio.run(
-                            join_session(config, sid, registry=registry)
-                        ),
+                        target=run_session,
                         daemon=True,
                         name=f"babeltower-session-{session_id}",
                     ).start()
