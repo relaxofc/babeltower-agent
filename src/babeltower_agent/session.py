@@ -347,17 +347,36 @@ async def process_event(
     return True
 
 
+def _try_get_intent(client: BabelTowerClient, intent_id: str | None) -> dict[str, Any] | None:
+    """Best-effort fetch of an intent for conversation context. A failure
+    (e.g. the intent was deleted, or the server doesn't expose it) must not
+    stop the session from running — the brain just gets less context."""
+    if not intent_id:
+        return None
+    try:
+        return client.get_intent(intent_id)
+    except Exception as exc:  # noqa: BLE001 - context is optional
+        print(f"[babeltower get_intent failed] {exc}", file=sys.stderr, flush=True)
+        return None
+
+
 async def join_session(
     config: Config,
     session_id: str,
     client: BabelTowerClient | None = None,
     registry: SessionRegistry | None = None,
     event_store: SessionEventStore | None = None,
+    my_intent_id: str | None = None,
+    counterparty_intent_id: str | None = None,
 ) -> None:
     owns_client = client is None
     if client is None:
         client = BabelTowerClient(config)
-    brain = AgentBrain(config)
+    # Load the two intents the session is about so the brain reasons with the
+    # owner's actual goal and the counterparty's, instead of an empty prompt.
+    active_intent = _try_get_intent(client, my_intent_id)
+    counterparty_intent = _try_get_intent(client, counterparty_intent_id)
+    brain = AgentBrain(config, active_intent, counterparty_intent)
     transcript: list[dict[str, str]] = []
     state: dict[str, Any] = {
         "proposed": False,
