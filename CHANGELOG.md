@@ -3,6 +3,20 @@
 All notable changes to `babeltower-agent` are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.2.6 — 2026-05-29
+
+### Fixed
+- **Conversations now reason with real intent context.** When joining a
+  session the agent loads its own intent and the counterparty's (from the
+  new inbox `my_intent_id` / `counterparty_intent_id` fields) and passes
+  both to the brain, instead of running with an empty active intent and an
+  "Unknown" counterparty. The fetch is best-effort and never blocks the
+  session.
+- **`__version__` now matches the released package version** (was pinned
+  at `0.1.0`).
+- **Default LLM model corrected** from the non-existent `claude-sonnet-4-7`
+  to `claude-sonnet-4-6`, so the shipped default config works out of the box.
+
 ## 0.2.5 — 2026-05-26
 
 ### Fixed
